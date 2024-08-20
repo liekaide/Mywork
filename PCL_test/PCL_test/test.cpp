@@ -1,109 +1,107 @@
 #include <iostream>
-#include <fstream>
-#include <vector>
+#include <pcl/common/common.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/features/normal_3d_omp.h>
 #include <pcl/io/obj_io.h>
 #include <pcl/point_types.h>
-#include <pcl/registration/icp.h>
-#include <Eigen/Dense>
+#include <pcl/surface/mls.h>
+#include <pcl/surface/poisson.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <boost/thread/thread.hpp>
 
+
+using namespace pcl;
 using namespace std;
-// 读取OBJ文件
-bool loadOBJ(const string& filename, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, vector<vector<int>>& faces) {
-    ifstream infile(filename);
-    if (!infile.is_open()) {
-        cerr << "Couldn't read file " << filename << endl;
-        return false;
+
+int main()
+{
+
+
+    PointCloud<PointXYZ>::Ptr cloud(new PointCloud<PointXYZ>);
+    if (io::loadOBJFile<PointXYZ>("data/25.obj", *cloud) == -1) {
+        cout << "数据读入失败！！" << endl;
+        return 1;
+    }
+    cout << "数据读入完成" << endl;
+
+
+   
+    /*滤波阶段*/
+    // MovingLeastSquares<PointXYZ, PointXYZ> mls;
+    // mls.setInputCloud(filtered);
+    // mls.setSearchRadius(0.01);
+    // mls.setPolynomialFit(true);
+    // mls.setPolynomialOrder(2);
+    // mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::SAMPLE_LOCAL_PLANE);
+    // mls.setUpsamplingRadius(0.005);
+    // mls.setUpsamplingStepSize(0.003);
+
+    // PointCloud<PointXYZ>::Ptr cloud_smoothed (new PointCloud<PointXYZ>());
+    // mls.process(*cloud_smoothed);
+    // cout << "移动最小二乘平面滤波完成" << endl;
+
+
+
+    /*法向计算阶段*/
+    NormalEstimationOMP<PointXYZ, Normal> ne;
+    ne.setNumberOfThreads(8);//设置用8个线程来加速计算.
+    ne.setInputCloud(cloud);
+    ne.setRadiusSearch(5);//设置法线计算时所用的半径
+    Eigen::Vector4f centroid;
+    compute3DCentroid(*cloud, centroid);//计算点云的质心
+    ne.setViewPoint(centroid[0], centroid[1], centroid[2]);//将质心设为视点，这样可以保证法向一致
+
+    PointCloud<Normal>::Ptr cloud_normals(new PointCloud<Normal>());//创建法线点云
+    ne.compute(*cloud_normals);//计算法线
+
+   /* for (size_t i = 0; i < cloud_normals->size(); ++i) {
+        cloud_normals->points[i].normal_x *= -1;
+        cloud_normals->points[i].normal_y *= -1;
+        cloud_normals->points[i].normal_z *= -1;
+    }*/
+
+
+    PointCloud<PointNormal>::Ptr cloud_smoothed_normals(new PointCloud<PointNormal>());
+    //将点云数据的坐标和法向信息拼接
+    concatenateFields(*cloud, *cloud_normals, *cloud_smoothed_normals);
+
+    cout << "法向计算　　　完成" << endl;
+
+
+
+    /*poission 重建阶段*/
+    //创建poisson重建对象
+    Poisson<PointNormal> poisson;
+    // poisson.setDepth(9);
+    //输入poisson重建点云数据
+    poisson.setInputCloud(cloud_smoothed_normals);
+    //创建网格对象指针，用于存储重建结果
+    PolygonMesh mesh;
+    //poisson重建开始
+    poisson.reconstruct(mesh);
+
+    //将重建结果存储到硬盘，并保存为PLY格式
+    io::saveOBJFile("result/reconstructed_25.obj", mesh);
+    cout << "曲面重建　　　完成" << endl;
+
+
+    /*图形显示阶段*/
+    cout << "开始图形显示......" << endl;
+    boost::shared_ptr<pcl::visualization::PCLVisualizer>viewer(new pcl::visualization::PCLVisualizer("my viewer"));
+
+    viewer->setBackgroundColor(0, 0, 7);
+    viewer->addPolygonMesh(mesh, "my");
+    viewer->addCoordinateSystem(50.0);
+    viewer->initCameraParameters();
+
+    while (!viewer->wasStopped()) {
+
+        viewer->spinOnce(100);
+        boost::this_thread::sleep(boost::posix_time::microseconds(100000));
     }
 
-    string line;
-    while (getline(infile, line)) {
-        if (line.substr(0, 2) == "v ") {
-            istringstream s(line.substr(2));
-            pcl::PointXYZ point;
-            s >> point.x; s >> point.y; s >> point.z;
-            cloud->push_back(point);
-        }
-        else if (line.substr(0, 2) == "f ") {
-            istringstream s(line.substr(2));
-            vector<int> face;
-            int vertex_index;
-            char slash;
-            while (s >> vertex_index) {
-                face.push_back(vertex_index);
-                if (s.peek() == '/') {
-                    s.ignore();
-                    if (s.peek() == '/') s.ignore();
-                    else s >> vertex_index;
-                }
-            }
-            faces.push_back(face);
-        }
-    }
 
-    return true;
+    return (0);
 }
 
-// 保存转换后的点云和面到OBJ文件
-void saveOBJ(const string& filename, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, const vector<vector<int>>& faces) {
-    ofstream outfile(filename);
-    if (!outfile.is_open()) {
-        cerr << "Couldn't write file " << filename << endl;
-        return;
-    }
-
-    for (const auto& point : cloud->points) {
-        outfile << "v " << point.x << " " << point.y << " " << point.z << endl;
-    }
-
-    for (const auto& face : faces) {
-        outfile << "f";
-        for (const auto& index : face) {
-            outfile << " " << index;
-        }
-        outfile << endl;
-    }
-}
-
-int main() {
-    // 定义点云类型
-    using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
-
-    // 读取两个OBJ文件
-    PointCloud::Ptr cloud_in(new PointCloud);
-    PointCloud::Ptr cloud_out(new PointCloud);
-    vector<vector<int>> faces_in, faces_out;
-
-    if (!loadOBJ("26.obj", cloud_in, faces_in) || !loadOBJ("25.obj", cloud_out, faces_out)) {
-        return -1;
-    }
-
-    // 创建ICP实例
-    pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-    icp.setInputSource(cloud_in);
-    icp.setInputTarget(cloud_out);
-
-    // 创建一个 pcl::PointCloud<pcl::PointXYZ>实例 Final 对象,存储配准变换后的源点云
-    PointCloud::Ptr Final(new PointCloud);
-    icp.align(*Final);
-
-    // 输出配准结果
-    cout << "has converged: " << icp.hasConverged() << " score: " << icp.getFitnessScore() << endl;
-    const Eigen::Matrix4f& matrix = icp.getFinalTransformation();
-    cout << "Transformation matrix: " << endl << matrix << endl;
-
-    // 将第二个点云转换到第一个点云的坐标系
-    for (auto& point : cloud_out->points) {
-        Eigen::Vector4f p(point.x, point.y, point.z, 1.0);
-        Eigen::Vector4f p_transformed = matrix * p;
-        point.x = p_transformed.x();
-        point.y = p_transformed.y();
-        point.z = p_transformed.z();
-    }
-
-    // 保存转换后的点云和面到新的OBJ文件
-    saveOBJ("transformed_26.obj", Final, faces_in);
-
-    cout << "Transformed result saved to transformed_26.obj" << endl;
-
-    return 0;
-}
