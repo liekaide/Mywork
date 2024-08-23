@@ -28,18 +28,16 @@ int main()
 
    
     /*滤波阶段*/
-    // MovingLeastSquares<PointXYZ, PointXYZ> mls;
-    // mls.setInputCloud(filtered);
-    // mls.setSearchRadius(0.01);
-    // mls.setPolynomialFit(true);
-    // mls.setPolynomialOrder(2);
-    // mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::SAMPLE_LOCAL_PLANE);
-    // mls.setUpsamplingRadius(0.005);
-    // mls.setUpsamplingStepSize(0.003);
+     MovingLeastSquares<PointXYZ, PointXYZ> mls;
+     mls.setInputCloud(cloud);
+     mls.setSearchRadius(3);
+     mls.setPolynomialOrder(2);//设置移动最小二乘的阶数;
+     mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::NONE);
+  
 
-    // PointCloud<PointXYZ>::Ptr cloud_smoothed (new PointCloud<PointXYZ>());
-    // mls.process(*cloud_smoothed);
-    // cout << "移动最小二乘平面滤波完成" << endl;
+     PointCloud<PointXYZ>::Ptr cloud_smoothed (new PointCloud<PointXYZ>());
+     mls.process(*cloud_smoothed);
+     cout << "移动最小二乘平面滤波完成" << endl;
 
 
 
@@ -73,7 +71,7 @@ int main()
     /*poission 重建阶段*/
     //创建poisson重建对象
     Poisson<PointNormal> poisson;
-    // poisson.setDepth(9);
+    poisson.setDepth(9);
     //输入poisson重建点云数据
     poisson.setInputCloud(cloud_smoothed_normals);
     //创建网格对象指针，用于存储重建结果
@@ -102,6 +100,6 @@ int main()
     }
 
 
-    return (0);
+    return 0;
 }
 
