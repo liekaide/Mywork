@@ -19,25 +19,25 @@ int main()
 
 
     PointCloud<PointXYZ>::Ptr cloud(new PointCloud<PointXYZ>);
-    if (io::loadOBJFile<PointXYZ>("data/25.obj", *cloud) == -1) {
+    if (io::loadOBJFile<PointXYZ>("data/29.obj", *cloud) == -1) {
         cout << "数据读入失败！！" << endl;
         return 1;
     }
     cout << "数据读入完成" << endl;
 
 
-   
-    /*滤波阶段*/
-     MovingLeastSquares<PointXYZ, PointXYZ> mls;
-     mls.setInputCloud(cloud);
-     mls.setSearchRadius(3);
-     mls.setPolynomialOrder(2);//设置移动最小二乘的阶数;
-     mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::NONE);
-  
 
-     PointCloud<PointXYZ>::Ptr cloud_smoothed (new PointCloud<PointXYZ>());
-     mls.process(*cloud_smoothed);
-     cout << "移动最小二乘平面滤波完成" << endl;
+    /*滤波阶段*/
+    MovingLeastSquares<PointXYZ, PointXYZ> mls;
+    mls.setInputCloud(cloud);
+    mls.setSearchRadius(0.3);
+    mls.setPolynomialOrder(2);//设置移动最小二乘的阶数;
+    mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::NONE);
+
+
+    PointCloud<PointXYZ>::Ptr cloud_smoothed(new PointCloud<PointXYZ>());
+    mls.process(*cloud_smoothed);
+    cout << "移动最小二乘平面滤波完成" << endl;
 
 
 
@@ -45,7 +45,7 @@ int main()
     NormalEstimationOMP<PointXYZ, Normal> ne;
     ne.setNumberOfThreads(8);//设置用8个线程来加速计算.
     ne.setInputCloud(cloud);
-    ne.setRadiusSearch(5);//设置法线计算时所用的半径
+    ne.setRadiusSearch(0.1);//设置法线计算时所用的半径
     Eigen::Vector4f centroid;
     compute3DCentroid(*cloud, centroid);//计算点云的质心
     ne.setViewPoint(centroid[0], centroid[1], centroid[2]);//将质心设为视点，这样可以保证法向一致
@@ -53,11 +53,11 @@ int main()
     PointCloud<Normal>::Ptr cloud_normals(new PointCloud<Normal>());//创建法线点云
     ne.compute(*cloud_normals);//计算法线
 
-   /* for (size_t i = 0; i < cloud_normals->size(); ++i) {
-        cloud_normals->points[i].normal_x *= -1;
-        cloud_normals->points[i].normal_y *= -1;
-        cloud_normals->points[i].normal_z *= -1;
-    }*/
+     for (size_t i = 0; i < cloud_normals->size(); ++i) {
+         cloud_normals->points[i].normal_x *= -1;
+         cloud_normals->points[i].normal_y *= -1;
+         cloud_normals->points[i].normal_z *= -1;
+     }
 
 
     PointCloud<PointNormal>::Ptr cloud_smoothed_normals(new PointCloud<PointNormal>());
@@ -71,7 +71,7 @@ int main()
     /*poission 重建阶段*/
     //创建poisson重建对象
     Poisson<PointNormal> poisson;
-    poisson.setDepth(9);
+    poisson.setDepth(10);
     //输入poisson重建点云数据
     poisson.setInputCloud(cloud_smoothed_normals);
     //创建网格对象指针，用于存储重建结果
@@ -79,8 +79,8 @@ int main()
     //poisson重建开始
     poisson.reconstruct(mesh);
 
-    //将重建结果存储到硬盘，并保存为PLY格式
-    io::saveOBJFile("result/reconstructed_25.obj", mesh);
+    //将重建结果存储到硬盘，并保存为OBJ格式
+    io::saveOBJFile("result/reconstructed_29.obj", mesh);
     cout << "曲面重建　　　完成" << endl;
 
 
@@ -102,4 +102,3 @@ int main()
 
     return 0;
 }
-
