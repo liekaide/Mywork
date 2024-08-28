@@ -1,15 +1,17 @@
 #include <iostream>
-#include <vector>
 #include <pcl/io/obj_io.h>
 #include <pcl/point_types.h>
+#include <pcl/surface/concave_hull.h>
+#include <pcl/surface/ear_clipping.h>
+#include <pcl/surface/mls.h>
 #include <pcl/PolygonMesh.h>
+#include <boost/make_shared.hpp>
 
 using namespace pcl;
 using namespace std;
 
-bool loadOBJ(const string& filename, PointCloud<PointXYZ>::Ptr& cloud, vector<Vertices>& faces) {
+bool loadOBJ(const string& filename, PointCloud<PointXYZ>::Ptr& cloud, PolygonMesh& mesh) {
     // 读取OBJ文件
-    PolygonMesh mesh;
     if (io::loadOBJFile(filename, mesh) == -1) {
         cerr << "Failed to load OBJ file: " << filename << endl;
         return false;
@@ -18,58 +20,55 @@ bool loadOBJ(const string& filename, PointCloud<PointXYZ>::Ptr& cloud, vector<Ve
     // 转换点云数据
     fromPCLPointCloud2(mesh.cloud, *cloud);
 
-    // 提取面数据
-    faces = mesh.polygons;
-
     return true;
 }
 
-void saveOBJ(const string& filename, const PointCloud<PointXYZ>::Ptr& cloud, const vector<Vertices>& faces) {
-    // 创建PolygonMesh对象
-    PolygonMesh mesh;
-    toPCLPointCloud2(*cloud, mesh.cloud);
-
-    // 添加面数据
-    mesh.polygons = faces;
-
+void saveOBJ(const string& filename, const PolygonMesh& mesh) {
     // 保存为OBJ文件
     io::saveOBJFile(filename, mesh);
 }
 
+void printMeshInfo(const PolygonMesh& mesh, const string& message) {
+    cout << message << endl;
+    cout << "Number of vertices: " << mesh.cloud.width * mesh.cloud.height << endl;
+    cout << "Number of polygons: " << mesh.polygons.size() << endl;
+}
+
 int main() {
     // 定义点云和面数据的容器
-    PointCloud<PointXYZ>::Ptr combined_cloud(new PointCloud<PointXYZ>);
-    vector<Vertices> combined_faces;
+    PointCloud<PointXYZ>::Ptr cloud(new PointCloud<PointXYZ>);
+    PolygonMesh mesh;
 
-    // 要合并的OBJ文件列表
-    vector<string> obj_files = { "data/26.obj", "data/28.obj", "data/27.obj" };
-
-    // 合并每个OBJ文件
-    for (const auto& file : obj_files) {
-        PointCloud<PointXYZ>::Ptr cloud(new PointCloud<PointXYZ>);
-        vector<Vertices> faces;
-
-        if (!loadOBJ(file, cloud, faces)) {
-            return -1;
-        }
-
-        // 合并点云数据
-        *combined_cloud += *cloud;
-
-        // 合并面数据，调整面数据的索引
-        int offset = combined_cloud->size() - cloud->size();
-        for (auto& face : faces) {
-            for (auto& vertex_index : face.vertices) {
-                vertex_index += offset;
-            }
-            combined_faces.push_back(face);
-        }
+    // 读取OBJ文件
+    if (!loadOBJ("data/25.obj", cloud, mesh)) {
+        return -1;
     }
+    cout << "数据读入完成" << endl;
 
-    // 保存合并后的OBJ文件
-    saveOBJ("result/combined.obj", combined_cloud, combined_faces);
+    // 打印输入网格信息
+    printMeshInfo(mesh, "输入网格信息:");
 
-    cout << "OBJ文件合并完成，结果已保存到result/combined.obj" << endl;
+    /* 滤波阶段 */
+    MovingLeastSquares<PointXYZ, PointXYZ> mls;
+    mls.setInputCloud(cloud);
+    mls.setSearchRadius(0.5);
+    mls.setPolynomialOrder(2); // 设置移动最小二乘的阶数
+    mls.setUpsamplingMethod(MovingLeastSquares<PointXYZ, PointXYZ>::NONE);
+
+    PointCloud<PointXYZ>::Ptr cloud_smoothed(new PointCloud<PointXYZ>());
+    mls.process(*cloud_smoothed);
+    cout << "移动最小二乘平面滤波完成" << endl;
+
+    // 创建包含滤波后点云的PolygonMesh
+    PolygonMesh filtered_mesh;
+    toPCLPointCloud2(*cloud_smoothed, filtered_mesh.cloud);
+
+    // 保留原始面的数据
+    filtered_mesh.polygons = mesh.polygons;
+
+    // 保存滤波后的点云为OBJ文件
+    saveOBJ("result/filtered_25.obj", filtered_mesh);
+    cout << "滤波后的数据已保存到result/filtered_25.obj" << endl;
 
     return 0;
 }
